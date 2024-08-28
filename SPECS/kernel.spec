@@ -407,6 +407,9 @@ echo "initrd of kernel %{uname_r} removed" >&2
 %{_sysconfdir}/bash_completion.d/bpftool
 
 %changelog
+* Wed Aug 28 2024 Angelina Vu <angelinavu@microsoft.com> - 6.6.29.1-5
+- Change BuildRequires: systemd-bootstrap-rpm-macros to systemd-rpm-macros
+
 * Tue Jun 11 2024 Juan Camposeco <juanarturoc@microsoft.com> - 6.6.29.1-5
 - Add patch to enable mstflint kernel driver 4.28.0-1
 
