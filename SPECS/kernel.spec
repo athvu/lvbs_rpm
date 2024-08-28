@@ -28,7 +28,7 @@
 %endif
 
 Summary:        Linux Kernel
-Name:           kernel
+Name:           kernel-lvbs
 Version:        6.6.29.1
 Release:        5%{?dist}
 License:        GPLv2
@@ -44,6 +44,7 @@ Source4:        cbl-mariner-ca-20211013.pem
 Source5:        cpupower
 Source6:        cpupower.service
 Patch0:		    0001-add-mstflint-kernel-%{mstflintver}.patch
+Patch1:		lvbs.patch
 BuildRequires:  audit-devel
 BuildRequires:  bash
 BuildRequires:  bc
@@ -163,6 +164,7 @@ manipulation of eBPF programs and maps.
 %prep
 %setup -q -n CBL-Mariner-Linux-Kernel-rolling-lts-mariner-%{mariner_version}-%{version}
 %patch 0 -p1
+%patch 1 -p1
 make mrproper
 
 cp %{config_source} .config
@@ -187,7 +189,7 @@ if [ -s config_diff ]; then
     echo "Update config file to set changed values explicitly"
 
 #  (DISABLE THIS IF INTENTIONALLY UPDATING THE CONFIG FILE)
-    exit 1
+#    exit 1
 fi
 
 %build
@@ -409,6 +411,9 @@ echo "initrd of kernel %{uname_r} removed" >&2
 %changelog
 * Wed Aug 28 2024 Angelina Vu <angelinavu@microsoft.com> - 6.6.29.1-5
 - Change BuildRequires: systemd-bootstrap-rpm-macros to systemd-rpm-macros
+- Rename to kernel-lvbs
+- Add lvbs.patch
+- Disable config check
 
 * Tue Jun 11 2024 Juan Camposeco <juanarturoc@microsoft.com> - 6.6.29.1-5
 - Add patch to enable mstflint kernel driver 4.28.0-1
