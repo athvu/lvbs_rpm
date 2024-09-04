@@ -3,8 +3,8 @@ Version:        0.0.1
 Release:        1%{?dist}
 Summary:        LVBS secure kernel
 
-License:	GPLv2        
-Source0:	lvbs-secure-0.0.1.tar.gz       
+License:        GPLv2
+Source0:        lvbs-secure-0.0.1.tar.gz     
 
 %description
 LVBS's secure linux kernel to run in VTL1.
@@ -12,11 +12,10 @@ LVBS's secure linux kernel to run in VTL1.
 %prep
 %autosetup
 
-
 %build
 make mshv_sk_defconfig
 make vmlinux
-objcopy -O binary -R .note -R .comment -S vmlinux vmlinux.bin 
+objcopy -O binary -R .note -R .comment -S vmlinux vmlinux.bin
 
 
 %changelog

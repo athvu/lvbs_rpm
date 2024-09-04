@@ -1,9 +1,9 @@
 Name:           skloader
 Version:        0.0.1
 Release:        1%{?dist}
-Summary:        Secure kernel bootloader 
+Summary:        Secure kernel bootloader
 
-License:        GPLv2 
+License:        GPLv2
 Source0:        skloader-0.0.1.tar.gz
 
 %description
