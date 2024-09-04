@@ -44,7 +44,28 @@ Source4:        cbl-mariner-ca-20211013.pem
 Source5:        cpupower
 Source6:        cpupower.service
 Patch0:         0001-add-mstflint-kernel-%{mstflintver}.patch
-Patch1:         lvbs.patch
+Patch1:         0001-lvbs.patch
+Patch2:         0002-lvbs.patch
+Patch3:         0003-lvbs.patch
+Patch4:         0004-lvbs.patch
+Patch5:         0005-lvbs.patch
+Patch6:         0006-lvbs.patch
+Patch7:         0007-lvbs.patch
+Patch8:         0008-lvbs.patch
+Patch9:         0009-lvbs.patch
+Patch10:        0010-lvbs.patch
+Patch11:        0011-lvbs.patch
+Patch12:        0012-lvbs.patch
+Patch13:        0013-lvbs.patch
+Patch14:        0014-lvbs.patch
+Patch15:        0015-lvbs.patch
+Patch16:        0016-lvbs.patch
+Patch17:        0017-lvbs.patch
+Patch18:        0018-lvbs.patch
+Patch19:        0019-lvbs.patch
+Patch20:        0020-lvbs.patch
+Patch21:        0021-lvbs.patch
+Patch22:        0022-lvbs.patch
 BuildRequires:  audit-devel
 BuildRequires:  bash
 BuildRequires:  bc
@@ -162,9 +183,7 @@ This package contains the bpftool, which allows inspection and simple
 manipulation of eBPF programs and maps.
 
 %prep
-%setup -q -n CBL-Mariner-Linux-Kernel-rolling-lts-mariner-%{mariner_version}-%{version}
-%patch 0 -p1
-%patch 1 -p1
+%autosetup -p1 -n CBL-Mariner-Linux-Kernel-rolling-lts-mariner-%{mariner_version}-%{version}
 make mrproper
 
 cp %{config_source} .config
