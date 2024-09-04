@@ -13,10 +13,15 @@ LVBS's secure linux kernel to run in VTL1.
 %autosetup
 
 %build
-make mshv_sk_defconfig
-make vmlinux
+%make_build mshv_sk_defconfig
+%make_build vmlinux
 objcopy -O binary -R .note -R .comment -S vmlinux vmlinux.bin
 
+%install
+install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs vmlinux.bin
+
+%files
+%{_libexecdir}/lvbs/vmlinux.bin
 
 %changelog
 * Thu Aug 29 07:19:39 UTC 2024 Angelina Vu <angelinavu@microsoft.com>
