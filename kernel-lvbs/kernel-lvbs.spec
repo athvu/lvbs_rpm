@@ -78,6 +78,7 @@ BuildRequires:  flex
 BuildRequires:  gettext
 BuildRequires:  glib-devel
 BuildRequires:  grub2-rpm-macros
+BuildRequires:  jre-openjdk
 BuildRequires:  kbd
 BuildRequires:  kmod-devel
 BuildRequires:  libcap-devel
