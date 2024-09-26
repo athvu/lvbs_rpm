@@ -43,6 +43,12 @@ Source3:        sha512hmac-openssl.sh
 Source4:        cbl-mariner-ca-20211013.pem
 Source5:        cpupower
 Source6:        cpupower.service
+# Secure Kernel Loader source
+%define skloaderdir skloader-0.0.1
+Source100:      %{skloaderdir}.tar.gz
+# Secure Kernel source
+%define securekerneldir lvbs-secure-0.0.1
+Source200:      %{securekerneldir}.tar.gz
 Patch0:         0001-add-mstflint-kernel-%{mstflintver}.patch
 Patch1:         0001-lvbs.patch
 Patch2:         0002-lvbs.patch
@@ -213,6 +219,12 @@ if [ -s config_diff ]; then
     exit 1
 fi
 
+# extract skloader source
+%__rpmuncompress -x %{SOURCE100}
+
+# extract secure kernel source
+%__rpmuncompress -x %{SOURCE200}
+
 %build
 make VERBOSE=1 KBUILD_BUILD_VERSION="1" KBUILD_BUILD_HOST="CBL-Mariner" ARCH=%{arch} %{?_smp_mflags}
 
@@ -242,6 +254,18 @@ for MODULE in `find %{buildroot}/lib/modules/%{uname_r} -name *.ko` ; do \
     %{__os_install_post}\
     %{__modules_install_post}\
 %{nil}
+
+# Build skloader
+pushd %{skloaderdir}
+%make_build
+popd
+
+# Build secure kernel
+pushd %{securekerneldir}
+%make_build mshv_sk_defconfig
+%make_build vmlinux
+objcopy -O binary -R .note -R .comment -S vmlinux vmlinux.bin
+popd
 
 %install
 install -vdm 755 %{buildroot}%{_sysconfdir}
@@ -321,6 +345,12 @@ make -C tools DESTDIR=%{buildroot} prefix=%{_prefix} bash_compdir=%{_sysconfdir}
 # Remove trace (symlink to perf). This file causes duplicate identical debug symbols
 rm -vf %{buildroot}%{_bindir}/trace
 
+# Install skloader
+install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{skloaderdir}/skloader.bin
+
+# Install secure kernel
+install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{securekerneldir}/vmlinux.bin
+
 %triggerin -- initramfs
 mkdir -p %{_localstatedir}/lib/rpm-state/initramfs/pending
 touch %{_localstatedir}/lib/rpm-state/initramfs/pending/%{uname_r}
@@ -371,6 +401,10 @@ echo "initrd of kernel %{uname_r} removed" >&2
 %exclude /lib/modules/%{uname_r}/kernel/drivers/accessibility
 %exclude /lib/modules/%{uname_r}/kernel/drivers/gpu
 %exclude /lib/modules/%{uname_r}/kernel/sound
+# skloader
+%{_libexecdir}/lvbs/skloader.bin
+# secure kernel
+%{_libexecdir}/lvbs/vmlinux.bin
 
 %files docs
 %defattr(-,root,root)
