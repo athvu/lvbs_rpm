@@ -77,6 +77,7 @@ BuildRequires:  elfutils-libelf-devel
 BuildRequires:  flex
 BuildRequires:  gettext
 BuildRequires:  glib-devel
+BuildRequires:  glibc-iconv
 BuildRequires:  grub2-rpm-macros
 BuildRequires:  jre-openjdk
 BuildRequires:  kbd
