@@ -72,6 +72,12 @@ Patch19:        0019-lvbs.patch
 Patch20:        0020-lvbs.patch
 Patch21:        0021-lvbs.patch
 Patch22:        0022-lvbs.patch
+Patch23:        0023-lvbs.patch
+Patch24:        0024-lvbs.patch
+Patch25:        0025-lvbs.patch
+Patch26:        0026-lvbs.patch
+Patch27:        0027-lvbs.patch
+Patch28:        0028-lvbs.patch
 BuildRequires:  audit-devel
 BuildRequires:  bash
 BuildRequires:  bc

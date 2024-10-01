@@ -1,0 +1,224 @@
+From 78f25442c1cc131296a6109d037c35b54b1e906b Mon Sep 17 00:00:00 2001
+From: Daniel Urbonas <t-durbonas@microsoft.com>
+Date: Fri, 16 Aug 2024 22:14:13 +0000
+Subject: [PATCH] Merged PR 161: Add Support for Sending Blacklist/Revocation
+ Keyring Data to Secure Kernel
+
+The blacklist keyring is populated from various different locations and can contain keys that are hashes or certificates. Store every key the makes its way to the blacklist during initialization and send to secure kernel when ready.
+
+Signed-off-by: Daniel Urbonas t-durbonas@microsoft.com
+
+----
+#### AI description  (iteration 1)
+#### PR Classification
+New feature: Adds support for sending blacklist/revocation keyring data to the secure kernel.
+
+#### PR Summary
+This pull request introduces functionality to handle and transmit blacklist and revocation keyring data to the secure kernel.
+- `virt/heki/module.c`: Added functions to store, copy, and manage blacklist hashes and revocation certificates.
+- `drivers/hv/hv_vsm.c`: Implemented functions to copy blacklist hash and key data to the hypervisor.
+- `include/linux/heki.h`: Defined new structures and function prototypes for handling blacklist hashes.
+- `certs/blacklist.c`: Integrated calls to store blacklist hashes and add key data to the revocation list.
+- `drivers/hv/hv_vsm.h`: Added new VTL call function IDs for copying blacklist hash and key data.
+---
+ certs/blacklist.c    |  3 ++
+ include/linux/heki.h | 12 +++++++
+ virt/heki/module.c   | 84 +++++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 95 insertions(+), 4 deletions(-)
+
+diff --git a/certs/blacklist.c b/certs/blacklist.c
+index 675dd7a8f07a..5e6e78c44e91 100644
+--- a/certs/blacklist.c
++++ b/certs/blacklist.c
+@@ -17,6 +17,7 @@
+ #include <linux/uidgid.h>
+ #include <keys/asymmetric-type.h>
+ #include <keys/system_keyring.h>
++#include <linux/heki.h>
+ #include "blacklist.h"
+ 
+ /*
+@@ -197,6 +198,8 @@ static int mark_raw_hash_blacklisted(const char *hash)
+ 		else
+ 			pr_err("Problem blacklisting hash %s: %pe\n", hash, key);
+ 		return PTR_ERR(key);
++	} else {
++		heki_store_blacklist_raw_hashes(hash);
+ 	}
+ 	return 0;
+ }
+diff --git a/include/linux/heki.h b/include/linux/heki.h
+index 96cc0593dba2..0f667e8ba8c0 100644
+--- a/include/linux/heki.h
++++ b/include/linux/heki.h
+@@ -53,6 +53,8 @@ struct heki_page {
+ 
+ enum heki_kdata_type {
+ 	HEKI_MODULE_CERTS,
++	HEKI_REVOCATION_CERTS,
++	HEKI_BLACKLIST_HASHES,
+ 	HEKI_KERNEL_INFO,
+ 	HEKI_KERNEL_DATA,
+ 	HEKI_KDATA_MAX,
+@@ -139,6 +141,11 @@ struct heki_args {
+ 	phys_addr_t head_pa;
+ };
+ 
++/* We store the hash, the prefix which is either "tbs:" or "bin:", and the null terminator */
++#define HEKI_MAX_TOTAL_HASH_LEN 133
++/* Currently 83 hashes get added to the blacklist keyring */
++#define HEKI_MAX_TOTAL_HASHES 100
++
+ /* Callback function called by the table walker. */
+ typedef void (*heki_func_t)(struct heki_args *args);
+ 
+@@ -162,6 +169,7 @@ long heki_validate_module(struct module *mod, struct load_info *info, int flags)
+ void heki_free_module_init(struct module *mod);
+ void heki_unload_module(struct module *mod);
+ void heki_copy_secondary_key(const void *data, size_t size);
++void __init heki_store_blacklist_raw_hashes(const char *hash);
+ 
+ /* Arch-specific functions. */
+ void heki_arch_init(void);
+@@ -186,6 +194,10 @@ static inline void heki_copy_secondary_key(const void *data, size_t size)
+ {
+ }
+ 
++static inline void heki_store_blacklist_raw_hashes(const char *hash)
++{
++}
++
+ #endif /* CONFIG_HEKI */
+ 
+ #endif /* __HEKI_H__ */
+diff --git a/virt/heki/module.c b/virt/heki/module.c
+index 2f089660ccff..5310a21173fc 100644
+--- a/virt/heki/module.c
++++ b/virt/heki/module.c
+@@ -15,12 +15,21 @@
+ extern __initconst const u8 system_certificate_list[];
+ extern __initconst const unsigned long module_cert_size;
+ 
++extern __initconst const u8 revocation_certificate_list[];
++extern __initconst const unsigned long revocation_certificate_list_size;
++
+ static struct heki_kinfo heki_kinfo;
+ 
+ static u8 *heki_module_certs;
+ static unsigned long heki_module_cert_size;
+ 
+-static int __init heki_copy_module_certs(void)
++static u8 *heki_revocation_certs;
++static unsigned long heki_revocation_cert_size;
++
++static char *heki_blacklist_hashes;
++static size_t heki_blacklist_hash_count;
++
++static int __init heki_copy_boot_certs(void)
+ {
+ 	heki_module_certs = vmalloc(module_cert_size);
+ 	if (!heki_module_certs) {
+@@ -34,9 +43,28 @@ static int __init heki_copy_module_certs(void)
+ 	 * the end of init.
+ 	 */
+ 	memcpy(heki_module_certs, system_certificate_list, module_cert_size);
++
++	if (revocation_certificate_list_size <= 0) {
++		pr_info("No revocation certificates found.\n");
++		return 0;
++	}
++
++	heki_revocation_certs = vmalloc(revocation_certificate_list_size);
++	if (!heki_revocation_certs) {
++		pr_warn("Failed to alloc revocation certificates.\n");
++		return -ENOMEM;
++	}
++	heki_revocation_cert_size = revocation_certificate_list_size;
++
++	/*
++	 * Copy the revocation certificates because they will be freed at
++	 * the end of init.
++	 */
++	memcpy(heki_revocation_certs, revocation_certificate_list,
++		revocation_certificate_list_size);
+ 	return 0;
+ }
+-core_initcall(heki_copy_module_certs);
++core_initcall(heki_copy_boot_certs);
+ 
+ static void heki_get_ranges(struct heki_args *args)
+ {
+@@ -72,9 +100,24 @@ void heki_load_kdata(void)
+ 	mutex_lock(&heki.lock);
+ 
+ 	args.attributes = HEKI_MODULE_CERTS;
+-	heki_walk((unsigned long) heki_module_certs,
+-		  (unsigned long) heki_module_certs + heki_module_cert_size,
++	heki_walk((unsigned long)heki_module_certs,
++		  (unsigned long)heki_module_certs + heki_module_cert_size,
++		  heki_get_ranges, &args);
++
++	if (heki_revocation_cert_size > 0) {
++		args.attributes = HEKI_REVOCATION_CERTS;
++		heki_walk((unsigned long)heki_revocation_certs,
++		  (unsigned long)heki_revocation_certs + heki_revocation_cert_size,
+ 		  heki_get_ranges, &args);
++	}
++
++	if (heki_blacklist_hash_count > 0) {
++		args.attributes = HEKI_BLACKLIST_HASHES;
++		heki_walk((unsigned long)heki_blacklist_hashes,
++			  (unsigned long)heki_blacklist_hashes +
++			  HEKI_MAX_TOTAL_HASH_LEN * heki_blacklist_hash_count,
++			  heki_get_ranges, &args);
++	}
+ 
+ 	heki_kinfo.ksymtab_start =
+ 			(struct kernel_symbol *) __start___ksymtab;
+@@ -106,6 +149,10 @@ void heki_load_kdata(void)
+ 
+ 	heki_cleanup_args(&args);
+ 	vfree(heki_module_certs);
++	vfree(heki_revocation_certs);
++	vfree(heki_blacklist_hashes);
++	heki_blacklist_hashes = NULL;
++	heki_blacklist_hash_count = 0;
+ }
+ 
+ long heki_validate_module(struct module *mod, struct load_info *info, int flags)
+@@ -212,3 +259,32 @@ void heki_copy_secondary_key(const void *data, size_t size)
+ 
+ 	heki_cleanup_args(&args);
+ }
++
++void __init heki_store_blacklist_raw_hashes(const char *hash)
++{
++	/* Initialize the blacklist hashes array if it does not already exist */
++	if (!heki_blacklist_hashes) {
++		heki_blacklist_hashes = vmalloc(HEKI_MAX_TOTAL_HASHES * HEKI_MAX_TOTAL_HASH_LEN);
++		if (!heki_blacklist_hashes) {
++			pr_warn("Failed to allocate memory for blacklist hashes\n");
++			return;
++		}
++	}
++
++	/* Check if the hash is longer than 132 characters not including null terminator.
++	 * Hashes are formally vetted automatically in both vtl0 and vtl1.
++	 */
++	if (strlen(hash) > HEKI_MAX_TOTAL_HASH_LEN - 1) {
++		pr_warn("Invalid hash: %s\n", hash);
++		return;
++	}
++
++	if (heki_blacklist_hash_count >= HEKI_MAX_TOTAL_HASHES) {
++		pr_warn("Maximum number of hashes reached. Cannot add new hash: %s\n", hash);
++		return;
++	}
++
++	strscpy(&heki_blacklist_hashes[heki_blacklist_hash_count * HEKI_MAX_TOTAL_HASH_LEN],
++		hash, HEKI_MAX_TOTAL_HASH_LEN);
++	heki_blacklist_hash_count++;
++}
+-- 
+2.42.0
+

@@ -1,0 +1,44 @@
+From aaf805d98a7eaef2584f62908b075c8ca6c74d9b Mon Sep 17 00:00:00 2001
+From: Angelina Vu <angelinavu@microsoft.com>
+Date: Fri, 27 Sep 2024 16:43:19 +0000
+Subject: [PATCH] Merged PR 164: Reserve secure kernel memory earlier
+
+Reserve secure kernel memory earlier by using __setup macro
+
+Signed-off-by: Angelina Vu <angelinavu@microsoft.com>
+---
+ drivers/hv/hv_vsm_securekernel.c | 14 ++------------
+ 1 file changed, 2 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/hv/hv_vsm_securekernel.c b/drivers/hv/hv_vsm_securekernel.c
+index d1ff1842adf3..7941cc6e97f3 100644
+--- a/drivers/hv/hv_vsm_securekernel.c
++++ b/drivers/hv/hv_vsm_securekernel.c
+@@ -105,17 +105,7 @@ int __init parse_securekernel(char *cmdline,
+ 					"securekernel=");
+ }
+ 
+-/*
+- * Add a dummy early_param handler to mark securekernel= as a known command line
+- * parameter and suppress incorrect warnings in init/main.c.
+- */
+-static int __init parse_securekernel_dummy(char *arg)
+-{
+-	return 0;
+-}
+-early_param("securekernel", parse_securekernel_dummy);
+-
+-static __init int hv_vsm_seckernel_mem_init(void)
++static int __init hv_vsm_seckernel_mem_init(char *__unused)
+ {
+ 	unsigned long long securekernel_size = 0, securekernel_base = 0;
+ 	int ret;
+@@ -183,4 +173,4 @@ static __init int hv_vsm_seckernel_mem_init(void)
+ 
+ 	return 0;
+ }
+-early_initcall(hv_vsm_seckernel_mem_init);
++__setup("securekernel", hv_vsm_seckernel_mem_init);
+-- 
+2.42.0
+

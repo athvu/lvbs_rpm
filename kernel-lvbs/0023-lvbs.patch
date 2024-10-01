@@ -1,0 +1,165 @@
+From 32f490c7d2cd1992812c68f4985c90f6fc987cdf Mon Sep 17 00:00:00 2001
+From: Daniel Urbonas <t-durbonas@microsoft.com>
+Date: Fri, 16 Aug 2024 18:02:20 +0000
+Subject: [PATCH] Merged PR 159: Runtime Secondary Key Support Added
+
+When keys are added to the secondary keyring, send the key payload data to vtl1 where it is verified, and corresponding key is added to the vtl0 trusted keyring.
+
+Signed-off-by: Daniel Urbonas t-durbonas@microsoft.com
+
+----
+#### AI description  (iteration 1)
+#### PR Classification
+New feature: Runtime support for secondary key data.
+
+#### PR Summary
+This pull request introduces runtime support for copying secondary key data to the hypervisor.
+- `virt/heki/module.c`: Added `heki_copy_secondary_add_key_data` function to handle copying secondary key data.
+- `drivers/hv/hv_vsm.c`: Implemented `hv_vsm_copy_secondary_key_data` function and updated `hyperv_heki_hypervisor` structure.
+- `security/keys/keyctl.c`: Integrated secondary key data copying in the `add_key` syscall.
+- `include/linux/heki.h`: Added function prototype for copying secondary key data.
+- `drivers/hv/hv_vsm.h`: Defined VSM call function ID for copying secondary key data.
+---
+ drivers/hv/hv_vsm.c    | 15 +++++++++++++++
+ drivers/hv/hv_vsm.h    |  1 +
+ include/linux/heki.h   |  8 ++++++++
+ security/keys/keyctl.c |  5 +++++
+ virt/heki/module.c     | 24 ++++++++++++++++++++++++
+ 5 files changed, 53 insertions(+)
+
+diff --git a/drivers/hv/hv_vsm.c b/drivers/hv/hv_vsm.c
+index 3ae1b089fc40..ae605aeb8802 100644
+--- a/drivers/hv/hv_vsm.c
++++ b/drivers/hv/hv_vsm.c
+@@ -190,6 +190,20 @@ static int hv_vsm_unload_module(long token)
+ 	return hv_vsm_vtlcall(&args);
+ }
+ 
++static int hv_vsm_copy_secondary_key(phys_addr_t pa, unsigned long nranges)
++{
++	struct vtlcall_param args = {0};
++
++	if (!hv_vsm_boot_success)
++		return -ENOTSUPP;
++
++	args.a0 = VSM_VTL_CALL_FUNC_ID_COPY_SECONDARY_KEY;
++	args.a1 = pa;
++	args.a2 = nranges;
++
++	return hv_vsm_vtlcall(&args);
++}
++
+ static struct heki_hypervisor hyperv_heki_hypervisor = {
+ 	.lock_crs = hv_vsm_lock_crs,
+ 	.finish_boot = hv_vsm_signal_end_of_boot,
+@@ -198,6 +212,7 @@ static struct heki_hypervisor hyperv_heki_hypervisor = {
+ 	.validate_module = hv_vsm_validate_module,
+ 	.free_module_init = hv_vsm_free_module_init,
+ 	.unload_module = hv_vsm_unload_module,
++	.copy_secondary_key = hv_vsm_copy_secondary_key,
+ };
+ 
+ void __init hv_vsm_init_heki(void)
+diff --git a/drivers/hv/hv_vsm.h b/drivers/hv/hv_vsm.h
+index 0ae9160fc3b1..165c63710e5d 100644
+--- a/drivers/hv/hv_vsm.h
++++ b/drivers/hv/hv_vsm.h
+@@ -18,6 +18,7 @@
+ #define VSM_VTL_CALL_FUNC_ID_VALIDATE_MODULE	0x1FFE6
+ #define VSM_VTL_CALL_FUNC_ID_FREE_MODULE_INIT	0x1FFE7
+ #define VSM_VTL_CALL_FUNC_ID_UNLOAD_MODULE	0x1FFE8
++#define VSM_VTL_CALL_FUNC_ID_COPY_SECONDARY_KEY 0x1FFE9
+ 
+ extern bool hv_vsm_boot_success;
+ extern bool hv_vsm_mbec_enabled;
+diff --git a/include/linux/heki.h b/include/linux/heki.h
+index e3adc43197f9..96cc0593dba2 100644
+--- a/include/linux/heki.h
++++ b/include/linux/heki.h
+@@ -101,6 +101,9 @@ struct heki_hypervisor {
+ 
+ 	/* Unload module. */
+ 	int (*unload_module)(long token);
++
++	/* Copy secondary key data. */
++	int (*copy_secondary_key)(phys_addr_t pa, unsigned long npages);
+ };
+ 
+ /*
+@@ -158,6 +161,7 @@ void heki_load_kdata(void);
+ long heki_validate_module(struct module *mod, struct load_info *info, int flags);
+ void heki_free_module_init(struct module *mod);
+ void heki_unload_module(struct module *mod);
++void heki_copy_secondary_key(const void *data, size_t size);
+ 
+ /* Arch-specific functions. */
+ void heki_arch_init(void);
+@@ -178,6 +182,10 @@ static inline long heki_validate_module(struct module *mod,
+ 	return 0;
+ }
+ 
++static inline void heki_copy_secondary_key(const void *data, size_t size)
++{
++}
++
+ #endif /* CONFIG_HEKI */
+ 
+ #endif /* __HEKI_H__ */
+diff --git a/security/keys/keyctl.c b/security/keys/keyctl.c
+index aa1dc43b16dd..56c9df1d47d8 100644
+--- a/security/keys/keyctl.c
++++ b/security/keys/keyctl.c
+@@ -22,6 +22,7 @@
+ #include <linux/uio.h>
+ #include <linux/uaccess.h>
+ #include <keys/request_key_auth-type.h>
++#include <linux/heki.h>
+ #include "internal.h"
+ 
+ #define KEY_MAX_DESC_SIZE 4096
+@@ -135,6 +136,10 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
+ 				       payload, plen, KEY_PERM_UNDEF,
+ 				       KEY_ALLOC_IN_QUOTA);
+ 	if (!IS_ERR(key_ref)) {
++		if (!strcmp(key_ref_to_ptr(keyring_ref)->description,
++			   ".secondary_trusted_keys"))
++			heki_copy_secondary_key(payload, plen);
++
+ 		ret = key_ref_to_ptr(key_ref)->serial;
+ 		key_ref_put(key_ref);
+ 	}
+diff --git a/virt/heki/module.c b/virt/heki/module.c
+index 4366d058ea4f..2f089660ccff 100644
+--- a/virt/heki/module.c
++++ b/virt/heki/module.c
+@@ -188,3 +188,27 @@ void heki_unload_module(struct module *mod)
+ 
+ 	mutex_unlock(&heki.lock);
+ }
++
++void heki_copy_secondary_key(const void *data, size_t size)
++{
++	struct heki_hypervisor *hypervisor = heki.hypervisor;
++	struct heki_args args = {};
++
++	if (!data || !hypervisor)
++		return;
++
++	mutex_lock(&heki.lock);
++
++	heki_walk((unsigned long)data,
++		  (unsigned long)data + size,
++		  heki_get_ranges, &args);
++
++	if (hypervisor->copy_secondary_key(args.head_pa, args.nranges))
++		pr_warn("Failed to load secondary key data.\n");
++	else
++		pr_warn("Loaded secondary key data\n");
++
++	mutex_unlock(&heki.lock);
++
++	heki_cleanup_args(&args);
++}
+-- 
+2.42.0
+
