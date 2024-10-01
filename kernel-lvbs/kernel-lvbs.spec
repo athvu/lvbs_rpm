@@ -352,10 +352,10 @@ make -C tools DESTDIR=%{buildroot} prefix=%{_prefix} bash_compdir=%{_sysconfdir}
 rm -vf %{buildroot}%{_bindir}/trace
 
 # Install skloader
-install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{skloaderdir}/skloader.bin
+install -D -m 0755 -t %{buildroot}%{_libdir}/firmware %{skloaderdir}/skloader.bin
 
 # Install secure kernel
-install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{securekerneldir}/vmlinux.bin
+install -D -m 0755 -t %{buildroot}%{_libdir}/firmware %{securekerneldir}/vmlinux.bin
 
 %triggerin -- initramfs
 mkdir -p %{_localstatedir}/lib/rpm-state/initramfs/pending
@@ -408,9 +408,9 @@ echo "initrd of kernel %{uname_r} removed" >&2
 %exclude /lib/modules/%{uname_r}/kernel/drivers/gpu
 %exclude /lib/modules/%{uname_r}/kernel/sound
 # skloader
-%{_libexecdir}/lvbs/skloader.bin
+%{_libdir}/firmware/skloader.bin
 # secure kernel
-%{_libexecdir}/lvbs/vmlinux.bin
+%{_libdir}/firmware/vmlinux.bin
 
 %files docs
 %defattr(-,root,root)
