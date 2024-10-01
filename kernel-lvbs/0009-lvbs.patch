@@ -1,0 +1,227 @@
+From 207a8c19e9e45829ea8e1215b5538962521222bb Mon Sep 17 00:00:00 2001
+From: Angelina Vu <angelinavu@microsoft.com>
+Date: Thu, 6 Jun 2024 17:51:31 -0400
+Subject: [PATCH 09/22] Add Hyper-V support for Heki
+
+Create a heki_hypervisor struct for Hyper-V. Implement lock crs functions
+for hyper-v to pass the appropriate arguments and call into the secure
+kernel .
+
+Signed-off-by: Angelina Vu <angelinavu@microsoft.com>
+---
+ arch/x86/kernel/cpu/mshyperv.c |   3 +
+ drivers/hv/Kconfig             |   1 +
+ drivers/hv/Makefile            |   2 +-
+ drivers/hv/hv_vsm.c            | 125 +++++++++++++++++++++++++++++++++
+ drivers/hv/hv_vsm.h            |   1 +
+ include/linux/vsm.h            |   6 ++
+ 6 files changed, 137 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/hv/hv_vsm.c
+
+diff --git a/arch/x86/kernel/cpu/mshyperv.c b/arch/x86/kernel/cpu/mshyperv.c
+index e6bba12c759c..fe93974a33ed 100644
+--- a/arch/x86/kernel/cpu/mshyperv.c
++++ b/arch/x86/kernel/cpu/mshyperv.c
+@@ -18,6 +18,8 @@
+ #include <linux/kexec.h>
+ #include <linux/i8253.h>
+ #include <linux/random.h>
++#include <linux/heki.h>
++#include <linux/vsm.h>
+ #include <asm/processor.h>
+ #include <asm/hypervisor.h>
+ #include <asm/hyperv-tlfs.h>
+@@ -640,6 +642,7 @@ const __initconst struct hypervisor_x86 x86_hyper_ms_hyperv = {
+ 	.init.x2apic_available	= ms_hyperv_x2apic_available,
+ 	.init.msi_ext_dest_id	= ms_hyperv_msi_ext_dest_id,
+ 	.init.init_platform	= ms_hyperv_init_platform,
++	.init.init_heki		= hv_vsm_init_heki,
+ #ifdef CONFIG_AMD_MEM_ENCRYPT
+ 	.runtime.sev_es_hcall_prepare = hv_sev_es_hcall_prepare,
+ 	.runtime.sev_es_hcall_finish = hv_sev_es_hcall_finish,
+diff --git a/drivers/hv/Kconfig b/drivers/hv/Kconfig
+index dc00760cfb1e..8fac045891f4 100644
+--- a/drivers/hv/Kconfig
++++ b/drivers/hv/Kconfig
+@@ -9,6 +9,7 @@ config HYPERV
+ 	select PARAVIRT
+ 	select X86_HV_CALLBACK_VECTOR if X86
+ 	select OF_EARLY_FLATTREE if OF
++	select HYPERVISOR_SUPPORTS_HEKI
+ 	help
+ 	  Select this option to run Linux as a Hyper-V client operating
+ 	  system.
+diff --git a/drivers/hv/Makefile b/drivers/hv/Makefile
+index 44efca6b2993..744b896beed1 100644
+--- a/drivers/hv/Makefile
++++ b/drivers/hv/Makefile
+@@ -15,4 +15,4 @@ hv_utils-y := hv_util.o hv_kvp.o hv_snapshot.o hv_fcopy.o hv_utils_transport.o
+ 
+ # Code that must be built-in
+ obj-$(subst m,y,$(CONFIG_HYPERV)) += hv_common.o
+-obj-$(subst m,y,$(CONFIG_HYPERV_VSM)) += hv_vsm_securekernel.o hv_vsm_boot.o
++obj-$(subst m,y,$(CONFIG_HYPERV_VSM)) += hv_vsm_securekernel.o hv_vsm_boot.o hv_vsm.o
+diff --git a/drivers/hv/hv_vsm.c b/drivers/hv/hv_vsm.c
+new file mode 100644
+index 000000000000..4333c17f1e2a
+--- /dev/null
++++ b/drivers/hv/hv_vsm.c
+@@ -0,0 +1,125 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2023, Microsoft Corporation.
++ *
++ */
++
++#include <linux/types.h>
++#include <linux/cpumask.h>
++#include <linux/sched.h>
++#include <linux/vsm.h>
++#include <linux/heki.h>
++#include <asm/mshyperv.h>
++#include "hv_vsm.h"
++
++static void __hv_vsm_vtlcall(struct vtlcall_param *args)
++{
++	u64 hcall_addr;
++
++	hcall_addr = (u64)((u8 *)hv_hypercall_pg + vsm_code_page_offsets.vtl_call_offset);
++	register u64 hypercall_addr asm("rax") = hcall_addr;
++
++	asm __volatile__ (	\
++	/*
++	 * Keep copies of the registers we modify.
++	 * Everything else is saved and restored by VTL1.
++	 */
++		"pushq	%%rdi\n"
++		"pushq	%%rsi\n"
++		"pushq	%%rdx\n"
++		"pushq	%%r8\n"
++		"pushq	%%rcx\n"
++		"pushq	%%rax\n"
++	/*
++	 * The vtlcall_param structure is in rdi, which is modified below, so copy it into a
++	 * register that stays constant in the instructon block immediately following.
++	 */
++		"movq	%1, %%rcx\n"
++	/* Copy values from vtlcall_param structure into registers used to communicate with VTL1 */
++		"movq	0x00(%%rcx), %%rdi\n"
++		"movq	0x08(%%rcx), %%rsi\n"
++		"movq	0x10(%%rcx), %%rdx\n"
++		"movq	0x18(%%rcx), %%r8\n"
++	/* Make rcx 0 */
++		"xorl	%%ecx, %%ecx\n"
++	/* VTL call */
++		CALL_NOSPEC
++	/* Restore rcx to args after VTL call */
++		"movq	40(%%rsp),  %%rcx\n"
++	/* Copy values from registers used to communicate with VTL1 into vtlcall_param structure */
++		"movq	%%rdi,  0x00(%%rcx)\n"
++		"movq	%%rsi,  0x08(%%rcx)\n"
++		"movq	%%rdx,  0x10(%%rcx)\n"
++		"movq	%%r8,  0x18(%%rcx)\n"
++	/* Restore all modified registers */
++		"popq	%%rax\n"
++		"popq	%%rcx\n"
++		"popq	%%r8\n"
++		"popq	%%rdx\n"
++		"popq	%%rsi\n"
++		"popq	%%rdi\n"
++		: ASM_CALL_CONSTRAINT
++		: "D"(args), THUNK_TARGET(hypercall_addr)
++		: "cc", "memory");
++}
++
++static int hv_vsm_vtlcall(struct vtlcall_param *args)
++{
++	unsigned long flags = 0;
++
++	local_irq_save(flags);
++	__hv_vsm_vtlcall(args);
++	local_irq_restore(flags);
++
++	return (int)args->a3;
++}
++
++#ifdef CONFIG_HEKI
++
++static int hv_vsm_lock_crs(void)
++{
++	cpumask_var_t orig_mask;
++	struct vtlcall_param args = {0};
++	int cpu, ret = 0;
++
++	if (!hv_vsm_boot_success)
++		return -ENOTSUPP;
++
++	args.a0 = VSM_VTL_CALL_FUNC_ID_LOCK_REGS;
++
++	if (!alloc_cpumask_var(&orig_mask, GFP_KERNEL)) {
++		ret = -ENOMEM;
++		goto out;
++	}
++	cpumask_copy(orig_mask, &current->cpus_mask);
++	/*
++	 * ToDo: Spin off separate threads on each cpu to do this.
++	 * Should be better from a performance point of view.
++	 * Irrespective this thread should wait until all cpus have locked
++	 * the registers
++	 */
++	for_each_online_cpu(cpu) {
++		set_cpus_allowed_ptr(current, cpumask_of(cpu));
++		ret = hv_vsm_vtlcall(&args);
++		if (ret) {
++			pr_err("%s: Unable to lock registers for cpu%d..Aborting\n",
++			       __func__, cpu);
++			break;
++		}
++	}
++	set_cpus_allowed_ptr(current, orig_mask);
++	free_cpumask_var(orig_mask);
++
++out:
++	return ret;
++}
++
++static struct heki_hypervisor hyperv_heki_hypervisor = {
++	.lock_crs = hv_vsm_lock_crs,
++};
++
++void __init hv_vsm_init_heki(void)
++{
++	heki.hypervisor = &hyperv_heki_hypervisor;
++}
++#endif
+diff --git a/drivers/hv/hv_vsm.h b/drivers/hv/hv_vsm.h
+index 4376a1aa3356..2e5cbdc0ff05 100644
+--- a/drivers/hv/hv_vsm.h
++++ b/drivers/hv/hv_vsm.h
+@@ -11,6 +11,7 @@
+ 
+ #define VSM_VTL_CALL_FUNC_ID_ENABLE_APS_VTL	0x1FFE0
+ #define VSM_VTL_CALL_FUNC_ID_BOOT_APS		0x1FFE1
++#define VSM_VTL_CALL_FUNC_ID_LOCK_REGS		0x1FFE2
+ 
+ extern bool hv_vsm_boot_success;
+ extern bool hv_vsm_mbec_enabled;
+diff --git a/include/linux/vsm.h b/include/linux/vsm.h
+index 357e09b7dab8..4b3f651fa1d1 100644
+--- a/include/linux/vsm.h
++++ b/include/linux/vsm.h
+@@ -12,6 +12,12 @@
+ 
+ void __init vsm_init(void);
+ 
++#ifdef CONFIG_HEKI
++void hv_vsm_init_heki(void);
++#else
++static inline void hv_vsm_init_heki(void) { }
++#endif /* CONFIG_HEKI */
++
+ #else /* !CONFIG_HYPERV_VSM */
+ 
+ static inline void vsm_init(void)
+-- 
+2.42.0
+
+

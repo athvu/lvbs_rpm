@@ -36,15 +36,42 @@ Vendor:         Microsoft Corporation
 Distribution:   Azure Linux
 Group:          System Environment/Kernel
 URL:            https://github.com/microsoft/CBL-Mariner-Linux-Kernel
-Source0:        https://github.com/microsoft/CBL-Mariner-Linux-Kernel/archive/rolling-lts/mariner-%{mariner_version}/%{version}.tar.gz#/%{name}-%{version}.tar.gz
+Source0:        https://github.com/microsoft/CBL-Mariner-Linux-Kernel/archive/rolling-lts/mariner-%{mariner_version}/%{version}.tar.gz#/kernel-%{version}.tar.gz
 Source1:        config
 Source2:        config_aarch64
 Source3:        sha512hmac-openssl.sh
 Source4:        cbl-mariner-ca-20211013.pem
 Source5:        cpupower
 Source6:        cpupower.service
-Patch0:		    0001-add-mstflint-kernel-%{mstflintver}.patch
-Patch1:		lvbs.patch
+# Secure Kernel Loader source
+%define skloaderdir skloader-0.0.1
+Source100:      %{skloaderdir}.tar.gz
+# Secure Kernel source
+%define securekerneldir lvbs-secure-0.0.1
+Source200:      %{securekerneldir}.tar.gz
+Patch0:         0001-add-mstflint-kernel-%{mstflintver}.patch
+Patch1:         0001-lvbs.patch
+Patch2:         0002-lvbs.patch
+Patch3:         0003-lvbs.patch
+Patch4:         0004-lvbs.patch
+Patch5:         0005-lvbs.patch
+Patch6:         0006-lvbs.patch
+Patch7:         0007-lvbs.patch
+Patch8:         0008-lvbs.patch
+Patch9:         0009-lvbs.patch
+Patch10:        0010-lvbs.patch
+Patch11:        0011-lvbs.patch
+Patch12:        0012-lvbs.patch
+Patch13:        0013-lvbs.patch
+Patch14:        0014-lvbs.patch
+Patch15:        0015-lvbs.patch
+Patch16:        0016-lvbs.patch
+Patch17:        0017-lvbs.patch
+Patch18:        0018-lvbs.patch
+Patch19:        0019-lvbs.patch
+Patch20:        0020-lvbs.patch
+Patch21:        0021-lvbs.patch
+Patch22:        0022-lvbs.patch
 BuildRequires:  audit-devel
 BuildRequires:  bash
 BuildRequires:  bc
@@ -56,7 +83,9 @@ BuildRequires:  elfutils-libelf-devel
 BuildRequires:  flex
 BuildRequires:  gettext
 BuildRequires:  glib-devel
+BuildRequires:  glibc-iconv
 BuildRequires:  grub2-rpm-macros
+BuildRequires:  jre-openjdk
 BuildRequires:  kbd
 BuildRequires:  kmod-devel
 BuildRequires:  libcap-devel
@@ -162,9 +191,7 @@ This package contains the bpftool, which allows inspection and simple
 manipulation of eBPF programs and maps.
 
 %prep
-%setup -q -n CBL-Mariner-Linux-Kernel-rolling-lts-mariner-%{mariner_version}-%{version}
-%patch 0 -p1
-%patch 1 -p1
+%autosetup -p1 -n CBL-Mariner-Linux-Kernel-rolling-lts-mariner-%{mariner_version}-%{version}
 make mrproper
 
 cp %{config_source} .config
@@ -189,8 +216,14 @@ if [ -s config_diff ]; then
     echo "Update config file to set changed values explicitly"
 
 #  (DISABLE THIS IF INTENTIONALLY UPDATING THE CONFIG FILE)
-#    exit 1
+    exit 1
 fi
+
+# extract skloader source
+%__rpmuncompress -x %{SOURCE100}
+
+# extract secure kernel source
+%__rpmuncompress -x %{SOURCE200}
 
 %build
 make VERBOSE=1 KBUILD_BUILD_VERSION="1" KBUILD_BUILD_HOST="CBL-Mariner" ARCH=%{arch} %{?_smp_mflags}
@@ -221,6 +254,18 @@ for MODULE in `find %{buildroot}/lib/modules/%{uname_r} -name *.ko` ; do \
     %{__os_install_post}\
     %{__modules_install_post}\
 %{nil}
+
+# Build skloader
+pushd %{skloaderdir}
+%make_build
+popd
+
+# Build secure kernel
+pushd %{securekerneldir}
+%make_build mshv_sk_defconfig
+%make_build vmlinux
+objcopy -O binary -R .note -R .comment -S vmlinux vmlinux.bin
+popd
 
 %install
 install -vdm 755 %{buildroot}%{_sysconfdir}
@@ -300,6 +345,12 @@ make -C tools DESTDIR=%{buildroot} prefix=%{_prefix} bash_compdir=%{_sysconfdir}
 # Remove trace (symlink to perf). This file causes duplicate identical debug symbols
 rm -vf %{buildroot}%{_bindir}/trace
 
+# Install skloader
+install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{skloaderdir}/skloader.bin
+
+# Install secure kernel
+install -D -m 0755 -t %{buildroot}%{_libexecdir}/lvbs %{securekerneldir}/vmlinux.bin
+
 %triggerin -- initramfs
 mkdir -p %{_localstatedir}/lib/rpm-state/initramfs/pending
 touch %{_localstatedir}/lib/rpm-state/initramfs/pending/%{uname_r}
@@ -350,6 +401,10 @@ echo "initrd of kernel %{uname_r} removed" >&2
 %exclude /lib/modules/%{uname_r}/kernel/drivers/accessibility
 %exclude /lib/modules/%{uname_r}/kernel/drivers/gpu
 %exclude /lib/modules/%{uname_r}/kernel/sound
+# skloader
+%{_libexecdir}/lvbs/skloader.bin
+# secure kernel
+%{_libexecdir}/lvbs/vmlinux.bin
 
 %files docs
 %defattr(-,root,root)

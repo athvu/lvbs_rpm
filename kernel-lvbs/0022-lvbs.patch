@@ -1,0 +1,24 @@
+From 10a41eb678b013b04ccd8e652c9890b257285ae7 Mon Sep 17 00:00:00 2001
+From: Angelina Vu <angelinavu@microsoft.com>
+Date: Thu, 15 Aug 2024 05:49:00 +0000
+Subject: [PATCH 22/22] include text-patching.h
+
+---
+ arch/x86/xen/enlighten_pv.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/x86/xen/enlighten_pv.c b/arch/x86/xen/enlighten_pv.c
+index aeb33e0a3f76..98b59d46b63a 100644
+--- a/arch/x86/xen/enlighten_pv.c
++++ b/arch/x86/xen/enlighten_pv.c
+@@ -72,6 +72,7 @@
+ #include <asm/mwait.h>
+ #include <asm/pci_x86.h>
+ #include <asm/cpu.h>
++#include <asm/text-patching.h>
+ #ifdef CONFIG_X86_IOPL_IOPERM
+ #include <asm/io_bitmap.h>
+ #endif
+-- 
+2.42.0
+
